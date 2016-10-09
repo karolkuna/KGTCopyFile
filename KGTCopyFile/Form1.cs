@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO;
+using System.Threading;
 
 namespace KGTCopyFile
 {
@@ -16,6 +17,8 @@ namespace KGTCopyFile
         const int BLOCK_SIZE = 1024 * 1024;
 
         private BackgroundWorker worker = new BackgroundWorker();
+        ManualResetEvent pauseEvent = new ManualResetEvent(true);
+
         private String sourceFilePath = null;
         private String destinationFilePath = null;
 
@@ -75,6 +78,8 @@ namespace KGTCopyFile
                     File.Delete(destinationFilePath);
                     break;
                 }
+
+                pauseEvent.WaitOne(Timeout.Infinite);
 
                 int percentage = (int) (((float) bytesCopied / fileSize) * 100);
                 worker.ReportProgress(percentage);
@@ -138,11 +143,13 @@ namespace KGTCopyFile
 
         private void PauseCopying()
         {
+            pauseEvent.Reset();
             SetUIState(UIState.Paused);
         }
 
         private void ResumeCopying()
         {
+            pauseEvent.Set();
             SetUIState(UIState.Copying);
         }
 
