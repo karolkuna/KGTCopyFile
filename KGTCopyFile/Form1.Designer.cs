@@ -111,7 +111,7 @@
             this.Controls.Add(this.cancelButton);
             this.Controls.Add(this.copyButton);
             this.Name = "Form1";
-            this.Text = "Form1";
+            this.Text = "Copy File";
             this.Load += new System.EventHandler(this.Form1_Load);
             this.ResumeLayout(false);
             this.PerformLayout();

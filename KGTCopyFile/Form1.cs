@@ -1,11 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO;
 using System.Threading;
@@ -14,19 +8,20 @@ namespace KGTCopyFile
 {
     public partial class Form1 : Form
     {
-        const int BLOCK_SIZE = 1024 * 1024;
+        const int BLOCK_SIZE = 1024 * 1024; // size of copied file chunks
 
         private BackgroundWorker worker = new BackgroundWorker();
-        ManualResetEvent pauseEvent = new ManualResetEvent(true);
+        private ManualResetEvent pauseEvent = new ManualResetEvent(true);
 
-        private String sourceFilePath = null;
-        private String destinationFilePath = null;
+        private string sourceFilePath;
+        private string destinationFilePath;
 
         enum UIState { Waiting, Copying, Paused};
         private UIState state = UIState.Waiting;
 
         private void SetUIState(UIState newState)
         {
+            // makes sure correct text is displayed on the copy button, keeps cancel button enabled only when needed
             state = newState;
             switch (state)
             {
@@ -44,6 +39,91 @@ namespace KGTCopyFile
                     cancelButton.Enabled = true;
                     break;
             }
+        }
+
+        public Form1()
+        {
+            InitializeComponent();
+            worker_Init();
+        }
+
+        private void Form1_Load(object sender, EventArgs e) { }
+
+        private void copyButton_Click(object sender, EventArgs e)
+        {
+            // depending on current state, copyButton can start/pause/resume copying
+            switch (state)
+            {
+                case UIState.Waiting:
+                    StartCopying();
+                    break;
+                case UIState.Paused:
+                    ResumeCopying();
+                    break;
+                case UIState.Copying:
+                    PauseCopying();
+                    break;
+            }
+        }
+
+        private void cancelButton_Click(object sender, EventArgs e)
+        {
+            if (worker.IsBusy) // if worker is running
+            {
+                worker.CancelAsync();
+                if (state == UIState.Paused) // background worker must first resume execution before it can cancel copying
+                {
+                    worker_ResumeWork();
+                }
+            }
+
+            SetUIState(UIState.Waiting);
+        }
+
+        private void StartCopying()
+        {
+            // check sanity of inputs
+            sourceFilePath = sourceTextBox.Text;
+            if (!File.Exists(sourceFilePath))
+            {
+                MessageBox.Show("Source file doesn´t exist at specified path!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            string fileName = Path.GetFileName(sourceFilePath);
+            string destinationFolderPath = destinationTextBox.Text;
+            if (!Directory.Exists(destinationFolderPath))
+            {
+                MessageBox.Show("Destination folder doesn´t exist at specified path!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            // keep the same filename at destination path
+            destinationFilePath = Path.Combine(destinationFolderPath, fileName);
+            if (File.Exists(destinationFilePath))
+            {
+                MessageBox.Show("File " + fileName + " already exists in destination folder!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            // avoid starting starting new copying when old one hasn´t yet finished
+            if (worker.IsBusy) return;
+
+            SetUIState(UIState.Copying);
+            worker.RunWorkerAsync();
+            worker_ResumeWork();
+        }
+
+        private void PauseCopying()
+        {
+            worker_PauseWork();
+            SetUIState(UIState.Paused);
+        }
+
+        private void ResumeCopying()
+        {
+            worker_ResumeWork();
+            SetUIState(UIState.Copying);
         }
 
         private void worker_Init()
@@ -66,22 +146,23 @@ namespace KGTCopyFile
 
             while ((bytesRead = sourceStream.Read(buffer, 0, BLOCK_SIZE)) > 0)
             {
-                destinationStream.Write(buffer, 0, bytesRead);
-
-                bytesCopied += bytesRead;
+                pauseEvent.WaitOne(Timeout.Infinite); // worker waits here indefinitely when copying is paused
 
                 if (worker.CancellationPending == true)
                 {
+                    // cancel copying and delete the uncomplete file
                     e.Cancel = true;
                     sourceStream.Close();
                     destinationStream.Close();
                     File.Delete(destinationFilePath);
-                    break;
+                    return;
                 }
 
-                pauseEvent.WaitOne(Timeout.Infinite);
+                destinationStream.Write(buffer, 0, bytesRead);
 
-                int percentage = (int) (((float) bytesCopied / fileSize) * 100);
+                bytesCopied += bytesRead;
+                int percentage = (int)(((float)bytesCopied / fileSize) * 100);
+
                 worker.ReportProgress(percentage);
             }
 
@@ -91,92 +172,34 @@ namespace KGTCopyFile
 
         private void worker_ProgressChanged(object sender, ProgressChangedEventArgs e)
         {
-            copyProgressBar.Value = e.ProgressPercentage;
+            if (state == UIState.Copying) // update progressbar only when copying is active
+            {
+                copyProgressBar.Value = e.ProgressPercentage;
+            }
         }
 
         private void worker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
-            copyProgressBar.Value = 100;
-            MessageBox.Show("File was successfully copied.", "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
             SetUIState(UIState.Waiting);
-        }
 
-        public Form1()
-        {
-            InitializeComponent();
-            worker_Init();
-        }
-
-        private void Form1_Load(object sender, EventArgs e)
-        {
-
-        }
-
-        private void StartCopying()
-        {
-            sourceFilePath = sourceTextBox.Text;
-            if (!File.Exists(sourceFilePath))
+            if (!e.Cancelled)
             {
-                MessageBox.Show("Source file doesn´t exist at specified path!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
+                copyProgressBar.Value = 100;
+                MessageBox.Show("File was successfully copied.", "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-
-            String fileName = Path.GetFileName(sourceFilePath);
-            String destinationFolderPath = destinationTextBox.Text;
-            if (!Directory.Exists(destinationFolderPath))
-            {
-                MessageBox.Show("Destination folder doesn´t exist at specified path!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            destinationFilePath = Path.Combine(destinationFolderPath, fileName);
-            if (File.Exists(destinationFilePath))
-            {
-                MessageBox.Show("File " + fileName + " already exists in destination folder!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            SetUIState(UIState.Copying);
-            
-            worker.RunWorkerAsync();
         }
 
-        private void PauseCopying()
+
+        private void worker_PauseWork()
         {
+            // notifies worker to pause work
             pauseEvent.Reset();
-            SetUIState(UIState.Paused);
         }
 
-        private void ResumeCopying()
+        private void worker_ResumeWork()
         {
+            // notifies worker to resume work
             pauseEvent.Set();
-            SetUIState(UIState.Copying);
-        }
-
-        private void copyButton_Click(object sender, EventArgs e)
-        {
-            switch (state)
-            {
-                case UIState.Waiting:
-                    StartCopying();
-                    break;
-                case UIState.Paused:
-                    ResumeCopying();
-                    break;
-                case UIState.Copying:
-                    PauseCopying();
-                    break;
-            }
-        }
-
-        private void cancelButton_Click(object sender, EventArgs e)
-        {
-            if (worker.IsBusy)
-            {
-                worker.CancelAsync();
-            }
-
-            SetUIState(UIState.Waiting);
         }
     }
 }
