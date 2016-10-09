@@ -13,7 +13,7 @@ namespace KGTCopyFile
 {
     public partial class Form1 : Form
     {
-        const int BLOCK_SIZE = 4096;
+        const int BLOCK_SIZE = 1024 * 1024;
 
         private BackgroundWorker worker = new BackgroundWorker();
         private String sourceFilePath = null;
@@ -56,21 +56,32 @@ namespace KGTCopyFile
         {
             FileStream sourceStream = new FileStream(sourceFilePath, FileMode.Open);
             FileStream destinationStream = new FileStream(destinationFilePath, FileMode.CreateNew);
+            byte[] buffer = new byte[BLOCK_SIZE];
+            long fileSize = sourceStream.Length;
+            int bytesCopied = 0;
+            int bytesRead;
 
-            for (int i = 0; i < 100; i++)
+            while ((bytesRead = sourceStream.Read(buffer, 0, BLOCK_SIZE)) > 0)
             {
-                if ((worker.CancellationPending == true))
+                destinationStream.Write(buffer, 0, bytesRead);
+
+                bytesCopied += bytesRead;
+
+                if (worker.CancellationPending == true)
                 {
                     e.Cancel = true;
+                    sourceStream.Close();
+                    destinationStream.Close();
+                    File.Delete(destinationFilePath);
                     break;
                 }
-                else
-                {
-                    // Perform a time consuming operation and report progress.
-                    System.Threading.Thread.Sleep(100);
-                    worker.ReportProgress(i);
-                }
+
+                int percentage = (int) (((float) bytesCopied / fileSize) * 100);
+                worker.ReportProgress(percentage);
             }
+
+            sourceStream.Close();
+            destinationStream.Close();
         }
 
         private void worker_ProgressChanged(object sender, ProgressChangedEventArgs e)
@@ -80,7 +91,9 @@ namespace KGTCopyFile
 
         private void worker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
+            copyProgressBar.Value = 100;
             MessageBox.Show("File was successfully copied.", "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            SetUIState(UIState.Waiting);
         }
 
         public Form1()
@@ -99,23 +112,23 @@ namespace KGTCopyFile
             sourceFilePath = sourceTextBox.Text;
             if (!File.Exists(sourceFilePath))
             {
-                //MessageBox.Show("Source file doesn´t exist at specified path!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                //return;
+                MessageBox.Show("Source file doesn´t exist at specified path!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
             }
 
             String fileName = Path.GetFileName(sourceFilePath);
             String destinationFolderPath = destinationTextBox.Text;
             if (!Directory.Exists(destinationFolderPath))
             {
-                //MessageBox.Show("Destination folder doesn´t exist at specified path!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                //return;
+                MessageBox.Show("Destination folder doesn´t exist at specified path!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
             }
 
             destinationFilePath = Path.Combine(destinationFolderPath, fileName);
             if (File.Exists(destinationFilePath))
             {
-                //MessageBox.Show("A file called " + fileName + " already exists in destination folder!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                //return;
+                MessageBox.Show("File " + fileName + " already exists in destination folder!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
             }
 
             SetUIState(UIState.Copying);
